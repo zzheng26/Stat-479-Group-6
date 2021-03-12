@@ -10,8 +10,8 @@ The csv files in Sample project data branch would be a sample of what we have al
 ## Raw data branch
 The csv files in raw data branch would be sample of what we have in raw data.
 
-## Documentation.pdf
+## Params and Meanings.pdf
 This documentation keeps track of what parameters in each dataset means.
 
-## Project Milestone 2_Curation and Design pdf
+## Project Milestone 2_Curation and Design.pdf
 This documentation is the report of what we did and intend to do in data curation and visualization.
