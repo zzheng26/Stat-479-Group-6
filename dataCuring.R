@@ -14,25 +14,25 @@ fileName = c("Chicago - OHare.csv",
              "New York - LaGuardia.csv",
              "Seattle - Seattle-Tacoma.csv")
 
-data = read.csv(fileName[1])[,-1] # get rid of the station name
+data = read.csv(fileName[1])[,-1] %>% # get rid of the station name
+  mutate(city = strsplit(fileName[1], split = " -")[[1]][1],  # add city name column
+         .before = 1)
+  
 for(i in 2:10){
-  data = rbind(data, read.csv(fileName[i])[,-1])
+  data = rbind(data, read.csv(fileName[i])[,-1] %>% 
+                 mutate(city = rep(strsplit(fileName[i], split = " -")[[1]][1]),
+                        .before = 1)
+              )
 }
 
 # clean data
 
 data.tidy = data %>% 
-  separate(col = "NAME", sep=", ", into = c("city_location","state_country")) %>%
+  separate(col = "NAME", sep=", ", into = c("location","state_country")) %>%
   separate(col = "state_country", sep = " ", into = c("state", "country")) %>%
   select(-"country") %>%
-  separate(col = "city_location", sep = " ", 
-           extra = "merge", into = c("city", "exact_location")) %>%
   separate(col = "DATE", sep = "-", into = c("year", "month"), convert = TRUE) %>%
   mutate(MXTRM = EMXT - EMNT)
-
-data.tidy$exact_location[data.tidy$city=="LOS"] = "INTERNATIONAL AIRPORT"
-data.tidy$city[data.tidy$city=="LOS"] = "LOS ANGELES"
-
 
 
 #### data imputation begins ####
@@ -45,12 +45,12 @@ check_snow_na = data.tidy %>%
   select(city, year, month, DSNW, EMSD, EMSN, SNOW) %>% 
   filter(is.na(DSNW) | is.na(EMSD) | is.na(EMSN) | is.na(SNOW))
 
-# notice that there are only 2 cities (MIAMI, LOS ANGELES: both locate south) having NA values. 
+# notice that there are only 2 cities (Miami, Los Angeles: both locate south) having NA values. 
 # Examine the issue further:
 
 check_snow_city = data.tidy %>%
   select(city, year, month, DSNW, EMSD, EMSN, SNOW) %>% 
-  filter(city == "LOS ANGELES" | city == "MIAMI")
+  filter(city == "Los Angeles" | city == "Miami")
 
 # This table shows that even when they have values, the numerical values are still all 0. 
 # This agrees with our assumption that they don't have snow at all
@@ -66,10 +66,11 @@ data.tidy = data.tidy %>%
 
 #### data imputation ends ####
 
+# ordered by city, then by year, then by month
 write.csv(data.tidy, file = "project_weather_data.csv",row.names = FALSE)
 
 
-# second dataframe: order by year and month
+# second dataframe: order by year and month, then by city
 dat2 = data.tidy %>%
   arrange(year, month, city) %>%
   mutate(city = factor(city))
