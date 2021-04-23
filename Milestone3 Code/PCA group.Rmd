@@ -1,0 +1,171 @@
+---
+title: "PCA weather"
+author: "Zhikai Zheng"
+date: "4/21/2021"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library("knitr")
+library("ggplot2")
+library("ggrepel")
+library("ggridges")
+library("plyr")
+library("dplyr")
+library("tidyverse")
+library("MASS")
+library("naniar")
+library("rpart")
+library("simputation")
+library("superheat")
+library("tidytext")
+library("tidymodels")
+library("RCurl")
+theme479 <- theme_minimal() + 
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "#f7f7f7"),
+    panel.border = element_rect(fill = NA, color = "#0c0c0c", size = 0.6),
+    legend.position = "bottom"
+  )
+theme_set(theme479)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# PCA analysis on Airport Weather data and practical analysis on aviation influences.
+
+Study Question: What is the weather pattern of those cities? Identify the cities that have weather patterns that are different with the others.
+
+The dataset that we have right now is very complicated. It has several different parameters that we need to analyze. We can use a PCA approach to group those parameters and analyze the pattern of the weather condition at those city airports.
+
+```{r}
+weather_raw <- read_csv("https://raw.githubusercontent.com/zzheng26/Stat-479-Group-6/main/SampleProjectData/project_weather_data.csv")
+weather_raw[is.na(weather_raw)] <-0
+```
+
+```{r}
+pca_rec <- recipe(~., data = weather_raw) %>%
+  update_role(city,location,state,year,month, new_role = "id") %>%
+  step_normalize(all_predictors()) %>%
+  step_pca(all_predictors())
+pca_prep <- prep(pca_rec)
+```
+
+```{r}
+scores <- juice(pca_prep)
+variances <- tidy(pca_prep, 2, type = "variance") %>%
+  filter(terms == "percent variance")
+components <- tidy(pca_prep, 2)
+components_ <- components %>%
+  filter(component %in% str_c("PC", 1:4)) %>%
+  mutate(terms = reorder_within(terms, abs(value), component))
+ggplot(components_, aes(value, terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ component, scales = "free_y") +
+  scale_y_reordered() +
+  labs(y = NULL) +
+  theme(axis.text = element_text(size = 7))
+```
+
+As we could see from the first 4 PCs above, different components would corresponding to different weather patterns, and we could identify those cities with extraordinary weather modes. 
+
+PC1 has constantly low temperature on minimum/maximum and average, with extensive snow. This corresponding to the winter weather characteristics, and we would expect most cities that are in the northern area would be high in PC1. As for the airport in those cities, proper de-icing equipments must be prepared in the winter condition and pilots must be trained to fly the plane in icing conditions. On the other hand, if the area would have low on PC1 value, that means it is unlikely to facing icy condition in such a region. Those airplanes with low ability to de-icing themselves would be safe in such condition, such as ATR-42, ATR-72 and low speed propeller aircrafts like Embrier-120. 
+
+On Jan.13th, 1982, Air Florida flight 90 crashed into the Potomac river shortly after taking off from Washinton National Airport (now Ronald Regan Washinton National Airport) killing 74 out of the 79 people onboard. On Oct.31st 1994, American Eagle flight 4184 crashed on decending to Chicago Airport killing all 68 people onboard the ATR-72. On Jan.9th, 1997, Comair flight 3272 crashed on approach to Detroit Metropolitan Airport, killing all 29 passengers onboard the EMB-120 propeller jet. Those accidents are all related to the icing build-up on the wings due to misjudgment on the icy conditions, and all the cities are shown up in the comparison plot indicates that they have high PC1 value. The analyzation of our PC1 would help the aviation industry to focus more on the icy conditions on those city airports to prevent the repeat of the tragedies under the winter conditions.
+
+PC2 on the other hand, have high daily precipitation and variance of temperature. This would corresponding to the late spring, summer and early fall weather conditions in the west and east shore. As for the airports with high PC2 value, summer thunderstorms and heavy rains are expected to happen, so the airports should have good draining system to keep the runway clean and dry, with great weather radars to monitor the development of the severe weathers and to guide the planes to safer airspaces in summer time. The pilots flying these regions must also be trained to cope with the heavy thunderstorms to keep safety. The cities would include Miami, Dallas, Seattle and NYC. 
+
+On August 2nd, 1985, Delta flight 191 crashed on landing in heavy thunderstorm at Dallas/Fort Worth Intl' airport, killing 136 out of 163 people onboard. This accident was due to insufficient recognition of the nature of thunderstorms back that time, where the severities of the storms are always ignored in order to keep the flight on schedule. On May 3rd, 2019, Miami air flight 293 overruns the runway at NAS Jacksonville, FL, during a violent landing in heavy thunderstorms, 21 passengers are injured in the evacuation. Over 30 years have passed and the pilots are still not well adapted to fly in the thunderstorm conditions in those cities, and the aviation industry are still underestimate the severity of rainstorms. The analyzation of our PC2 would help to identify the cities that are in the areas of high possibility of thunderstorms in summer time and help for better training and preparation on such weather for the pilots.
+
+```{r, warning=F}
+ggplot(scores, aes(PC1, PC2, label = city)) +
+  geom_point(aes(color = factor(month)), alpha = 0.7, size = 0.5) +
+  geom_text_repel(check_overlap = TRUE, size = 3) +
+  coord_fixed(sqrt(variances$value[2] / variances$value[1])) # rescale axes to reflect variance
+```
+
+The next 2 components are looking for the extremes in the cities.
+
+PC3 has high temperature variance, high snowfall rate and average precipitations. This would corresponding to the cities that have dramatic changing weathers over a year, namely those cities located in the north part of the middle of the U.S., and northeast coast.Those cities would have abnormal winter weather patterns where they are not so cold but the snow fall is really heavy. As we can see from the plot below, PC3 is high in NYC and Chicago, probably because the location of those cities are near the lakes and ocean where the weather patterns are changed.
+
+PC4 has high wind indication, which is also a very important indicator for the airport to safely operate. As we can see from the plot below, no one has extremely high value of PC4. This is a good sign that those airports in those cities are constructed at good position with constantly low winds in every month. Constantly low winds would mean safety for the airplanes.
+
+As for the extremely low indications for Denver, original data was checked and there are missing wind data in 2013 in Denver, so the months in that year would have outliers in the graph. Proper imputation would be carried out in the next iteration.
+
+```{r, warning=F}
+ggplot(scores, aes(PC3, PC4, label = city)) +
+  geom_point(aes(color = factor(month)), alpha = 0.7, size = 0.5) +
+  geom_text_repel(check_overlap = TRUE, size = 3) +
+  coord_fixed(sqrt(variances$value[4] / variances$value[3])) # rescale axes to reflect variance
+```
+
+```{r echo = FALSE, message=FALSE, warning=FALSE}
+library(shiny)
+library(ggplot2)
+library(dplyr)
+#monthRes = read.csv("project_weather_data.csv")
+monthRes <- weather_raw
+shinyApp(
+  ui <- fluidPage(
+
+    # Application title
+    titlePanel(h1("Average Wind Speed Interactive Comparison", 
+                  align = "center")),
+
+    # Sidebar with a slider input for number of bins 
+        # Show a plot of the generated distribution
+    mainPanel(
+        br(),
+        br(),
+        fluidRow(
+            align="center",
+            plotOutput("Plot", width = "65%")
+        ),
+        width = 12,
+        br(),
+        br(),
+           div(sliderInput("years",
+                       "Year:",
+                       min = 2010,
+                       max = 2019,
+                       value = 2015,
+                       step = 1), align = "center")
+    )
+
+  ),
+
+  # Define server logic required to draw a histogram
+  server <- function(input, output) {
+
+    output$Plot <- renderPlot(
+        ggplot(data = monthRes[monthRes$year==input$years,], 
+               aes(x = city, y=AWND, color = city)) +
+            geom_boxplot(outlier.shape=16, outlier.size=1, notch=FALSE) + 
+            scale_y_continuous(name = "Average Wind Speed")+
+            theme_classic()+
+            theme(axis.title.x = element_blank(),
+                  axis.title.y = element_text(size=8, face="bold"),
+                  axis.text = element_text(size=7))+
+            scale_color_manual(values=c("#6d6e71", "#E69F00", "#662d91", 
+                                        "#009E73","#ed1c24", "#0072B2", 
+                                        "#D55E00", "#b3b837","#19bfba",
+                                        "#bf5b19"))+
+            theme(legend.position = "none")+
+            theme(legend.title = element_text(size = 6), 
+                  legend.text = element_text(size = 6))+
+            geom_dotplot(binaxis='y', stackdir='center', 
+                         dotsize=0.5, aes(fill=city),
+                         color="white")+
+            scale_fill_manual(values=c("#6d6e71", "#E69F00", "#662d91", 
+                                       "#009E73","#ed1c24", "#0072B2", 
+                                       "#D55E00", "#b3b837","#19bfba",
+                                       "#bf5b19"))
+    )
+  },
+  
+  options = list(
+    width = "100%", height = 1000
+  )
+)
+```
