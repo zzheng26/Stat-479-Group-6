@@ -1,0 +1,95 @@
+---
+title: "Homeless data curation 2"
+author: "Angelica Sun"
+date: "4/23/2021"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library("readxl")
+library("dplyr")
+library("readr")
+library("tidyr")
+```
+
+```{r}
+# preparation work
+
+years = seq(2010, 2019, by=1) 
+homeless = data.frame(NULL)
+states = c("GA", "IL", "TX", "CO", "NV", "CA", "WI", "FL", "NY", "WA")
+states.full = c(
+  "Georgia", "Illinois", "Texas", "Colorado", "Nevada", "California", 
+  "Wisconsin", "Florida", "New York", "Washington"
+)
+```
+
+
+```{r}
+# cleaning Homeless data
+
+for(i in years){
+  temp.string = paste0("Overall Homeless, ", i)
+  temp = read_excel("2007-2019-Point-in-Time-Estimates-by-state.xlsx", sheet = as.character(i)) %>%
+    select("State", temp.string) %>%
+    filter(State %in% states) %>%
+    mutate(year = i) %>%
+    rename("Overall Homeless" = temp.string)
+  
+  homeless = rbind(homeless, temp)
+}
+```
+
+
+```{r}
+# Cleaning EMXT weather data
+
+geo.ref = data.frame(
+  city = c("Atlanta", "Chicago", "Dallas", "Denver", "Las Vegas", "Los Angeles",
+           "Madison", "Miami", "New York", "Seattle"),
+  State = states,
+  Region = c("4", "2", "5", "1", "5", "4",
+             "1", "5", "2", "3")
+)
+
+weather = read_csv("project_weather_data in year resolution.csv")%>%
+  select(city, year, EMXT) %>%
+  merge(y = geo.ref, all.x = TRUE, by = "city")
+```
+
+
+```{r}
+# Cleanig population data
+
+states.ref = data.frame(
+  State = states,
+  NAME = states.full
+)
+
+population = read_csv("nst-est2019-alldata.csv") %>%
+  select(NAME, POPESTIMATE2010:POPESTIMATE2019) %>%
+  filter(NAME %in% states.full) %>%
+  merge(y = states.ref, all.x = TRUE, by = "NAME") %>%
+  mutate(NAME = NULL) %>%
+  pivot_longer(cols = 1:10, 
+               names_prefix = "POPESTIMATE",
+               names_to = "year", 
+               values_to = "Population", 
+               names_transform = list(year = as.double))
+```
+
+```{r}
+# Merge above data into one dataset
+
+full_data = left_join(weather, homeless, by = c("year", "State")) %>%
+  left_join(y = population, by = c("year", "State")) %>%
+  mutate("Percent Homeless" = `Overall Homeless` / Population)
+
+write.csv(full_data, "homeless_weather.csv", row.names = FALSE)
+```
+
