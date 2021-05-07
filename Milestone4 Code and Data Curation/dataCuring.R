@@ -1,0 +1,136 @@
+require(dplyr)
+require(tidyr)
+
+# read in and merge data
+
+fileName = c("Chicago - OHare.csv", 
+             "Atlanta - Jackson Atlanta Airport.csv",
+             "Dallas - Dallas-Fort Worth Airport.csv",
+             "Denver - Denver International.csv",
+             "Las Vegas - McCarran Airport.csv",
+             "Los Angeles - LAX.csv",
+             "Madison - Dane Co Airport.csv",
+             "Miami - Miami Airport.csv",
+             "New York - LaGuardia.csv",
+             "Seattle - Seattle-Tacoma.csv")
+
+data = read.csv(fileName[1])[,-1] %>% # get rid of the station name
+  mutate(city = strsplit(fileName[1], split = " -")[[1]][1],  # add city name column
+         .before = 1)
+  
+for(i in 2:10){
+  data = rbind(data, read.csv(fileName[i])[,-1] %>% 
+                 mutate(city = rep(strsplit(fileName[i], split = " -")[[1]][1]),
+                        .before = 1)
+              )
+}
+
+# clean data
+
+data.tidy = data %>% 
+  separate(col = "NAME", sep=", ", into = c("location","state_country")) %>%
+  separate(col = "state_country", sep = " ", into = c("state", "country")) %>%
+  select(-"country") %>%
+  separate(col = "DATE", sep = "-", into = c("year", "month"), convert = TRUE) %>%
+  mutate(MXTRM = EMXT - EMNT)
+
+
+#### data imputation begins ####
+
+# it is observed that the city on the south typically only have NA meaures for
+# the snow related measures. Here we assume that they don't ever snow at all (so no need
+# for measuring) and impute the missing values accordingly.
+
+check_snow_na = data.tidy %>%
+  select(city, year, month, DSNW, EMSD, EMSN, SNOW) %>% 
+  filter(is.na(DSNW) | is.na(EMSD) | is.na(EMSN) | is.na(SNOW))
+
+# notice that there are only 2 cities (Miami, Los Angeles: both locate south) having NA values. 
+# Examine the issue further:
+
+check_snow_city = data.tidy %>%
+  select(city, year, month, DSNW, EMSD, EMSN, SNOW) %>% 
+  filter(city == "Los Angeles" | city == "Miami")
+
+# This table shows that even when they have values, the numerical values are still all 0. 
+# This agrees with our assumption that they don't have snow at all
+# So we feel safe to proceed and set the missing values in these 4 columns to be 0.
+
+data.tidy = data.tidy %>%
+  mutate(
+    DSNW = ifelse(is.na(DSNW), 0, DSNW),
+    EMSD = ifelse(is.na(EMSD), 0, EMSD),
+    EMSN = ifelse(is.na(EMSN), 0, EMSN),
+    SNOW = ifelse(is.na(SNOW), 0, SNOW)
+  )
+
+#### data imputation ends ####
+
+# ordered by city, then by year, then by month
+write.csv(data.tidy, file = "project_weather_data.csv",row.names = FALSE)
+
+
+# second dataframe: order by year and month, then by city
+dat2 = data.tidy %>%
+  arrange(year, month, city) %>%
+  mutate(city = factor(city))
+
+write.csv(dat2, file = "project_weather_data reordered by time.csv",row.names = FALSE)
+
+
+# third dataframe: change resolution to year, along with new derived variables
+dat3 = data.tidy %>%
+  group_by(city, year) %>%
+  summarise(sd_AWND = sd(AWND), AWND = mean(AWND),
+            DP10 = sum(DP10), DSNW = sum(DSNW), 
+            DT00 = sum(DT00), DX32 = sum(DX32), 
+            DX90 = sum(DX90), EMNT = min(EMNT),
+            EMSD = max(EMSD), EMSN = max(EMSN),
+            EMXP = max(EMXP), EMXT = max(EMXT),
+            PRCP = sum(PRCP), SNOW = sum(SNOW),
+            sd_TAVG = sd(TAVG), sd_TMAX = sd(TMAX),
+            sd_TMIN = sd(TMIN), MXTR = EMXT - EMNT)
+
+write.csv(dat3, file = "project_weather_data in year resolution.csv",row.names = FALSE)
+
+# change the monthly dataframe to be a long version with interseted variable name
+# for observable plotting
+dat = read.csv("project_weather_data.csv")
+dat1 = dat %>%
+  select(
+    city, year, month, "Average Wind Speed" = AWND,
+    "Total precipitation in mm" = PRCP,
+    "Number of Days with minimum temperature no greater than 0F" = DT00,
+    "Number of Days with maximum temperature no less than 90F" = DX90,
+    "Lowest Daily Minimum Temperature" = EMNT,
+    "Highest daily maximum temperature" = EMXT,
+    "Average monthly temperature" = TAVG,
+    "Highest daily snowfall in mm" = EMSN,
+    "Number of Days with snowfall no less than 1 inch" = DSNW,
+    "Total snowfall in mm" = SNOW,
+    
+  ) %>%
+  pivot_longer(cols = 4:13,
+               names_to = "variables",
+               values_to = "values",
+               values_transform = list(as.double())
+  )
+  
+write.csv(dat1, file = "long_data_for_observable.csv",row.names = FALSE)
+
+dat2 = dat %>%
+  select(
+    city, year, month, "Average Wind Speed" = AWND,
+    "Total precipitation in mm" = PRCP,
+    "Number of Days with minimum temperature no greater than 0F" = DT00,
+    "Number of Days with maximum temperature no less than 90F" = DX90,
+    "Lowest Daily Minimum Temperature" = EMNT,
+    "Highest daily maximum temperature" = EMXT,
+    "Average monthly temperature" = TAVG,
+    "Highest daily snowfall in mm" = EMSN,
+    "Number of Days with snowfall no less than 1 inch" = DSNW,
+    "Total snowfall in mm" = SNOW,
+    
+  )
+
+write.csv(dat1, file = "wide_data_for_observable.csv",row.names = FALSE)

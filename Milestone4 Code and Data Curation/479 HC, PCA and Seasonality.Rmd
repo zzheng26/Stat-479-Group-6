@@ -1,0 +1,175 @@
+---
+title: "Clustering, PCA and Seasonal analysis"
+author: "Zhikai Zheng"
+date: "4/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo = FALSE}
+library("knitr")
+library("ggplot2")
+library("ggrepel")
+library("ggridges")
+library("plyr")
+library("dplyr")
+library("tidyverse")
+library("MASS")
+library("naniar")
+library("rpart")
+library("simputation")
+library("superheat")
+library("tidytext")
+library("tidymodels")
+library("tidygraph")
+library("RCurl")
+library("ggraph")
+library("tsibble")
+library("tsibbledata")
+library("lubridate")
+library("feasts")
+library("zoo")
+theme479 <- theme_minimal() + 
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "#f7f7f7"),
+    panel.border = element_rect(fill = NA, color = "#0c0c0c", size = 0.6),
+    legend.position = "bottom"
+  )
+theme_set(theme479)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We start with the discussion of weather data.
+
+# Hierarchical Clustering
+
+Study Question: Find the relationship of the cities with similar weather pattern.
+
+We first want to examine our data to see if it makes sense. Starting with a hierarchical clustering with all data we have.
+
+```{r, echo = FALSE}
+weather_year <- read_csv("https://raw.githubusercontent.com/zzheng26/Stat-479-Group-6/main/SampleProjectData/project_weather_data%20in%20year%20resolution.csv")
+weather_year[is.na(weather_year)] <-0
+```
+
+```{r, echo = FALSE}
+weather_wide<-weather_year%>%
+  pivot_wider(names_from = year, values_from = 
+                c(sd_AWND,AWND,DP10,DSNW,DT00,DX32,DX90,EMNT,EMSD,EMSN,EMXP,
+                  EMXT,PRCP,SNOW,sd_TAVG,sd_TMAX,sd_TMIN,MXTR))%>%
+  column_to_rownames(var = "city") %>%
+  dist()
+```
+
+```{r, echo = FALSE}
+hclust_result <- hclust(weather_wide)
+plot(hclust_result)
+```
+
+As we can see from this hierarchical cluster dendrogram, cities with close weather pattern are grouped. Chicago and Madison have the most similar weather pattern, which is what we would expected as they have the closest distance from each other. NYC and seattle would have the next closest is what we quite unexpected since NYC is on the east coast but seattle is on the west coast. However, those 2 cities both located on the shoreline where Seattle is a little bit further north than NYC, and they both have the "temperate marine climate" characteristics. Dallas and Las Vegas have nearby location so they would have similar weather, except the percipitation varies as Las Vegas located in the desert. Atlanta and Miami are both southern cities where they all belongs to "tropical marine climate" patterns. Denver located in the middle mountaineous area where it would also have characteristic of middle north America like Chicago and Madison. LA is located also along the coast which gives it similar weather pattern towards Seattle.
+
+# PCA analysis
+
+Study Question: Examine extreme weather components and its affects on homeless people.
+
+The dataset that we have right now is very complicated. It has several different parameters that we need to analyze. We can use a PCA approach to group those parameters and analyze the pattern of the weather condition at those city airports.
+
+```{r, echo=FALSE, echo = FALSE}
+weather_raw <- read_csv("https://raw.githubusercontent.com/zzheng26/Stat-479-Group-6/main/SampleProjectData/project_weather_data.csv")
+weather_raw[is.na(weather_raw)] <-0
+```
+
+```{r, echo=FALSE}
+pca_rec <- recipe(~., data = weather_raw) %>%
+  update_role(city,location,state,year,month, new_role = "id") %>%
+  step_normalize(all_predictors()) %>%
+  step_pca(all_predictors())
+pca_prep <- prep(pca_rec)
+```
+
+```{r, echo=FALSE}
+scores <- juice(pca_prep)
+variances <- tidy(pca_prep, 2, type = "variance") %>%
+  filter(terms == "percent variance")
+components <- tidy(pca_prep, 2)
+components_ <- components %>%
+  filter(component %in% str_c("PC", 1:4)) %>%
+  mutate(terms = reorder_within(terms, abs(value), component))
+ggplot(components_, aes(value, terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ component, scales = "free_y") +
+  scale_y_reordered() +
+  labs(y = NULL) +
+  theme(axis.text = element_text(size = 7))
+```
+
+As we could see from the first 4 PCs above, different components would corresponding to different weather patterns, and we could identify those cities with extraordinary weather modes. 
+
+PC1 has constantly low temperature on minimum/maximum and average, with extensive snow. This corresponding to the winter weather characteristics, and we would expect most cities that are in the northern area would be high in PC1. Cold condition is bad for homeless people as it would lower their survival rate.
+
+PC2 on the other hand, have high daily precipitation and variance of temperature. This would corresponding to the late spring, summer and early fall weather conditions in the west and east shore. As for the cities with high PC2 value, summer thunderstorms and heavy rains are expected to happen. It is also severe for the homeless people to tackle floods and rainstorms because they would need to constantly taking cover.
+
+```{r, warning=F,echo=FALSE}
+ggplot(scores, aes(PC1, PC2, label = city)) +
+  geom_point(aes(color = factor(month)), alpha = 0.7, size = 0.5) +
+  geom_text_repel(check_overlap = TRUE, size = 3) +
+  coord_fixed(sqrt(variances$value[2] / variances$value[1])) # rescale axes to reflect variance
+```
+
+The next 2 components are looking for the extremes in the cities.
+
+PC3 has high temperature variance, high snowfall rate and average precipitations. This would corresponding to the cities that have dramatic changing weathers over a year, namely those cities located in the north part of the middle of the U.S., and northeast coast.Those cities would have abnormal winter weather patterns where they are not so cold but the snow fall is really heavy. As we can see from the plot below, PC3 is high in NYC and Chicago, probably because the location of those cities are near the lakes and ocean where the weather patterns are changed. High variance of temperature is probematic for homeless people as they would need to tackle not only hot/cold weather but the high temperature in the middle of the day and the low temperature in the evening.
+
+PC4 is talking about high winds. High winds is also probematic for homeless people and we want to see if their is city with abnormal windspeed. As we can see from the plot below, no one has extremely high value of PC4.
+
+```{r, warning=F,echo=FALSE}
+ggplot(scores, aes(PC3, PC4, label = city)) +
+  geom_point(aes(color = factor(month)), alpha = 0.7, size = 0.5) +
+  geom_text_repel(check_overlap = TRUE, size = 3) +
+  coord_fixed(sqrt(variances$value[4] / variances$value[3])) # rescale axes to reflect variance
+```
+
+
+```{r, warning=F,echo=FALSE}
+ggplot(scores, aes(PC2, PC3, label = city)) +
+  geom_point(aes(color = factor(month)), alpha = 0.7, size = 0.5) +
+  geom_text_repel(check_overlap = TRUE, size = 3) +
+  coord_fixed(sqrt(variances$value[3] / variances$value[2])) # rescale axes to reflect variance
+```
+
+# Seasonal Analysis 
+
+We can also perform seasonal analysis to see if there is seasonality in those cities.
+
+```{r, echo=FALSE}
+weather_raw$date <- yearmonth(as.yearmon(paste(weather_raw$year, weather_raw$month), "%Y %m"))
+weather_ts = fill_gaps(as_tsibble(weather_raw, key = city, index = date))
+cols <- scales::viridis_pal()(10)
+gg_season(weather_ts, y= weather_ts$TAVG,pal = cols)+
+  xlab("Month")+
+  ylab("Average Temperature")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1) )+
+  facet_wrap(~city,ncol = 5)
+```
+
+As we can see, the temperature in those cities show strong seasonality each year.
+
+```{r, echo=FALSE}
+gg_season(weather_ts, y= weather_ts$PRCP,pal = cols)+
+  xlab("Month")+
+  ylab("Precipitation")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1) )+
+  facet_wrap(~city,ncol = 5)
+```
+
+The precipitation in those cities would varies from year to year, where the seasonalities are not strong. But if we look at Miami, there is a seasonality shown where the middle part of the plot is significantly higher, which indicate more rains in the summer. And in LA and Seattle, there are actually less precipitation in the summer rather than in winter times. 
+
+```{r, echo=FALSE}
+gg_season(weather_ts, y= weather_ts$AWND,pal = cols)+
+  xlab("Month")+
+  ylab("Windspeed")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1) )+
+  facet_wrap(~city,ncol = 5)
+```
+
+As for wind speed, many cities would have strong seasonality each year. However, Las Vegas would have lower windspeed in recent years. 
